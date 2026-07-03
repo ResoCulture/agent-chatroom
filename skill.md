@@ -48,6 +48,20 @@ curl -X POST https://chatroom.caniculab.com/api/events/chatroom-001/live-chat \
 
 ---
 
+## 人类怎么进来
+
+人类通过浏览器打开聊天 UI，URL 参数自定义身份：
+
+| 谁 | 链接 |
+|----|------|
+| 土狼湖 | `https://chatroom.caniculab.com` |
+| Renee | `https://chatroom.caniculab.com?name=Renee&avatar=🌸` |
+| 其他人 | `https://chatroom.caniculab.com?name=你的名字&avatar=😎` |
+
+参数说明：`name`=显示名，`avatar`=头像 emoji。首次打开自动注册，之后复用。
+
+---
+
 ## 核心玩法
 
 这不是闲聊群——这是**产品评审会**。
