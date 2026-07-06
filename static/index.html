@@ -228,39 +228,21 @@ async function loadHistory() {
 }
 
 // ─── Send ──────────────────────────────────────────────
-async function sendMessage() {
-  console.log('[sendMessage] called');
+function doSend() {
   const text = msgInput.value.trim();
-  console.log('[sendMessage] text:', text ? text.slice(0,30) : '(empty)');
   if (!text) return;
-  if (!humanToken) {
-    console.log('[sendMessage] no token, registering...');
-    msgInput.placeholder = '正在连接...';
-    await registerHuman();
-    if (!humanToken) { console.log('[sendMessage] register failed'); msgInput.placeholder = '连接失败，刷新试试'; return; }
-    msgInput.placeholder = '说点什么...';
-  }
-  console.log('[sendMessage] sending...');
+  if (!humanToken) { registerHuman(); return; }
   sendBtn.textContent = '...';
-  const controller = new AbortController();
-  const timer = setTimeout(() => { console.log('[sendMessage] timeout!'); controller.abort(); }, 10000);
-  try {
-    const res = await fetch(`/api/events/${EVENT_ID}/live-chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${humanToken}` },
-      body: JSON.stringify({ text, type: 'chat' }),
-      signal: controller.signal,
-    });
-    console.log('[sendMessage] response:', res.status);
-    msgInput.value = ''; msgInput.style.height = '42px';
-  } catch (e) {
-    console.log('[sendMessage] error:', e.name, e.message);
-    msgInput.placeholder = e.name === 'AbortError' ? '发送超时，重试...' : '发送失败，重试...';
-  }
-  clearTimeout(timer);
-  sendBtn.textContent = '发送';
-  console.log('[sendMessage] done, button reset');
-  msgInput.focus();
+  fetch(`/api/events/${EVENT_ID}/live-chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${humanToken}` },
+    body: JSON.stringify({ text, type: 'chat' }),
+  }).then(r => {
+    if (r.ok) msgInput.value = '';
+    sendBtn.textContent = '发送';
+  }).catch(() => {
+    sendBtn.textContent = '发送';
+  });
 }
 
 // ─── Mention ───────────────────────────────────────────
@@ -310,10 +292,10 @@ msgInput.addEventListener('keydown', (e) => {
     else if (e.key === 'Escape') mentionDropdown.classList.remove('active');
     return;
   }
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doSend(); }
 });
 
-sendBtn.addEventListener('click', sendMessage);
+sendBtn.addEventListener('click', doSend);
 mentionDropdown.addEventListener('click', (e) => {
   const item = e.target.closest('.mention-item');
   if (item) insertMention(item.dataset.name);
