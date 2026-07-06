@@ -186,17 +186,20 @@ function updateAvatarList() {
   }).join('');
 }
 
-// ─── SSE ───────────────────────────────────────────────
-function connectSSE() {
-  const es = new EventSource(`/api/events/${EVENT_ID}/stream`);
-  es.onmessage = (e) => {
-    try {
-      const d = JSON.parse(e.data);
-      if (d.type === 'new_message') addMessage(d.message);
-      else if (d.type === 'participant_joined') fetchParticipants();
-    } catch (_) {}
-  };
-  es.onerror = () => setTimeout(connectSSE, 3000);
+// ─── Polling ────────────────────────────────────────────
+let lastMsgId = '';
+async function pollMessages() {
+  try {
+    const res = await fetch(`/api/events/${EVENT_ID}/live-chat?limit=20`);
+    const data = await res.json();
+    for (const msg of data.messages) {
+      if (!shownMessages.has(msg.message_id)) {
+        addMessage(msg);
+        lastMsgId = msg.message_id;
+      }
+    }
+  } catch (e) {}
+  setTimeout(pollMessages, 3000);
 }
 
 // ─── Messages ──────────────────────────────────────────
@@ -306,7 +309,7 @@ async function init() {
   await registerHuman();
   await fetchParticipants();
   await loadHistory();
-  connectSSE();
+  pollMessages();
   setInterval(fetchParticipants, 30000);
 }
 init();
