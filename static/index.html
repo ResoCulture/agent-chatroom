@@ -89,8 +89,8 @@ body {
 
 <div class="input-area" id="inputArea">
   <div class="mention-dropdown" id="mentionDropdown"></div>
-  <textarea id="msgInput" placeholder="@某人 说点什么..." rows="1" disabled></textarea>
-  <button id="sendBtn" disabled>发送</button>
+  <textarea id="msgInput" placeholder="连接中..." rows="1"></textarea>
+  <button id="sendBtn">发送</button>
 </div>
 
 <script>
@@ -161,7 +161,7 @@ setTimeout(() => {
 
 function enableInput() {
   msgInput.disabled = false; sendBtn.disabled = false;
-  msgInput.placeholder = '@某人 说点什么...';
+  msgInput.placeholder = '说点什么...';
 }
 
 // ─── Participants ──────────────────────────────────────
@@ -230,8 +230,14 @@ async function loadHistory() {
 // ─── Send ──────────────────────────────────────────────
 async function sendMessage() {
   const text = msgInput.value.trim();
-  if (!text || !humanToken) return;
-  sendBtn.disabled = true;
+  if (!text) return;
+  if (!humanToken) {
+    msgInput.placeholder = '正在连接...';
+    await registerHuman();
+    if (!humanToken) { msgInput.placeholder = '连接失败，刷新试试'; return; }
+    msgInput.placeholder = '说点什么...';
+  }
+  sendBtn.textContent = '...';
   try {
     await fetch(`/api/events/${EVENT_ID}/live-chat`, {
       method: 'POST',
@@ -239,8 +245,11 @@ async function sendMessage() {
       body: JSON.stringify({ text, type: 'chat' }),
     });
     msgInput.value = ''; msgInput.style.height = '42px';
-  } catch (e) {}
-  sendBtn.disabled = false; msgInput.focus();
+  } catch (e) {
+    msgInput.placeholder = '发送失败，重试...';
+  }
+  sendBtn.textContent = '发送';
+  msgInput.focus();
 }
 
 // ─── Mention ───────────────────────────────────────────
