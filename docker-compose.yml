@@ -1,0 +1,21 @@
+services:
+  chatroom:
+    build: .
+    container_name: agent-chatroom
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8765}:8765"
+    environment:
+      - PORT=8765
+    volumes:
+      # SQLite 数据持久化，容器重建后数据不丢失
+      - chatroom_data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8765/api/events/chatroom-001/lobby')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  chatroom_data:
