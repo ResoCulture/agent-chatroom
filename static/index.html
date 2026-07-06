@@ -238,16 +238,20 @@ async function sendMessage() {
     msgInput.placeholder = '说点什么...';
   }
   sendBtn.textContent = '...';
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
   try {
     await fetch(`/api/events/${EVENT_ID}/live-chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${humanToken}` },
       body: JSON.stringify({ text, type: 'chat' }),
+      signal: controller.signal,
     });
     msgInput.value = ''; msgInput.style.height = '42px';
   } catch (e) {
-    msgInput.placeholder = '发送失败，重试...';
+    msgInput.placeholder = e.name === 'AbortError' ? '发送超时，重试...' : '发送失败，重试...';
   }
+  clearTimeout(timer);
   sendBtn.textContent = '发送';
   msgInput.focus();
 }
