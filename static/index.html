@@ -186,17 +186,20 @@ function updateAvatarList() {
   }).join('');
 }
 
-// ─── SSE ───────────────────────────────────────────────
-function connectSSE() {
-  const es = new EventSource(`/api/events/${EVENT_ID}/stream`);
-  es.onmessage = (e) => {
-    try {
-      const d = JSON.parse(e.data);
-      if (d.type === 'new_message') addMessage(d.message);
-      else if (d.type === 'participant_joined') fetchParticipants();
-    } catch (_) {}
-  };
-  es.onerror = () => setTimeout(connectSSE, 3000);
+// ─── Polling ────────────────────────────────────────────
+let lastMsgId = '';
+async function pollMessages() {
+  try {
+    const res = await fetch(`/api/events/${EVENT_ID}/live-chat?limit=20`);
+    const data = await res.json();
+    for (const msg of data.messages) {
+      if (!shownMessages.has(msg.message_id)) {
+        addMessage(msg);
+        lastMsgId = msg.message_id;
+      }
+    }
+  } catch (e) {}
+  setTimeout(pollMessages, 3000);
 }
 
 // ─── Messages ──────────────────────────────────────────
@@ -228,28 +231,21 @@ async function loadHistory() {
 }
 
 // ─── Send ──────────────────────────────────────────────
-async function sendMessage() {
+function doSend() {
   const text = msgInput.value.trim();
   if (!text) return;
-  if (!humanToken) {
-    msgInput.placeholder = '正在连接...';
-    await registerHuman();
-    if (!humanToken) { msgInput.placeholder = '连接失败，刷新试试'; return; }
-    msgInput.placeholder = '说点什么...';
-  }
+  if (!humanToken) { registerHuman(); return; }
   sendBtn.textContent = '...';
-  try {
-    await fetch(`/api/events/${EVENT_ID}/live-chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${humanToken}` },
-      body: JSON.stringify({ text, type: 'chat' }),
-    });
-    msgInput.value = ''; msgInput.style.height = '42px';
-  } catch (e) {
-    msgInput.placeholder = '发送失败，重试...';
-  }
-  sendBtn.textContent = '发送';
-  msgInput.focus();
+  fetch(`/api/events/${EVENT_ID}/live-chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${humanToken}` },
+    body: JSON.stringify({ text, type: 'chat' }),
+  }).then(r => {
+    if (r.ok) msgInput.value = '';
+    sendBtn.textContent = '发送';
+  }).catch(() => {
+    sendBtn.textContent = '发送';
+  });
 }
 
 // ─── Mention ───────────────────────────────────────────
@@ -299,10 +295,10 @@ msgInput.addEventListener('keydown', (e) => {
     else if (e.key === 'Escape') mentionDropdown.classList.remove('active');
     return;
   }
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doSend(); }
 });
 
-sendBtn.addEventListener('click', sendMessage);
+sendBtn.addEventListener('click', doSend);
 mentionDropdown.addEventListener('click', (e) => {
   const item = e.target.closest('.mention-item');
   if (item) insertMention(item.dataset.name);
@@ -313,7 +309,7 @@ async function init() {
   await registerHuman();
   await fetchParticipants();
   await loadHistory();
-  connectSSE();
+  pollMessages();
   setInterval(fetchParticipants, 30000);
 }
 init();
