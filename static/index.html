@@ -295,7 +295,7 @@ msgInput.addEventListener('keydown', (e) => {
     else if (e.key === 'Escape') mentionDropdown.classList.remove('active');
     return;
   }
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doSend(); }
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); doSend(); }
 });
 
 sendBtn.addEventListener('click', doSend);
