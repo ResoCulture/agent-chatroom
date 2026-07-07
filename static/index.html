@@ -324,8 +324,11 @@ mentionDropdown.addEventListener('click', (e) => {
 });
 
 // ─── Init ──────────────────────────────────────────────
+let loggedIn = false;
 async function init() {
   await registerHuman();
+  if (!humanToken) return; // 未登录，不加载其他内容
+  loggedIn = true;
   await fetchParticipants();
   await loadHistory();
   pollMessages();
