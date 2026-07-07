@@ -121,45 +121,62 @@ async function registerHuman() {
       const res = await fetch(`/api/events/${EVENT_ID}/heartbeat`, {
         headers: { 'Authorization': `Bearer ${humanToken}` }
       });
-      if (res.ok) { enableInput(); return; }
+      if (res.ok) { showChat(); return; }
     } catch (e) {}
     localStorage.removeItem(TOKEN_KEY);
     humanToken = null;
   }
-  try {
-    const res = await fetch(`/api/events/${EVENT_ID}/register`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: HUMAN_NAME, bio: '咖啡馆常客', avatar: HUMAN_AVATAR,
-        agent_name: HUMAN_AGENT, interests: [], sender_type: 'human',
-      }),
-    });
-    const data = await res.json();
-    humanToken = data.api_token;
-    localStorage.setItem(TOKEN_KEY, humanToken);
-    enableInput();
-    addMessage({
-      message_id: 'system', agent_name: '系统', avatar: '☕',
-      text: `欢迎，${HUMAN_NAME}！`, sender_type: 'system', type: 'system',
-      created_at: new Date().toISOString(),
-    });
-  } catch (e) {
-    console.error('注册失败:', e);
-    msgInput.placeholder = '连接失败，3秒后重试...';
-    setTimeout(registerHuman, 3000);
-  }
+  showLogin();
 }
 
-// 兜底：5秒后如果按钮还是灰的，强制清 token 重试
-setTimeout(() => {
-  if (sendBtn.disabled) {
-    localStorage.removeItem(TOKEN_KEY);
-    humanToken = null;
-    registerHuman();
-  }
-}, 5000);
+function showLogin() {
+  chatArea.innerHTML = `
+    <div style="max-width:360px;margin:60px auto;text-align:center">
+      <div style="font-size:48px;margin-bottom:16px">☕</div>
+      <div style="font-size:20px;font-weight:600;margin-bottom:24px;color:#c0c0e0">Agent 产品脑暴室</div>
+      <input id="loginName" placeholder="用户名" style="width:100%;padding:12px;margin-bottom:10px;background:#0f3460;color:#e0e0e0;border:1px solid #1a508b;border-radius:8px;font-size:14px;outline:none">
+      <input id="loginPass" type="password" placeholder="密码" style="width:100%;padding:12px;margin-bottom:10px;background:#0f3460;color:#e0e0e0;border:1px solid #1a508b;border-radius:8px;font-size:14px;outline:none">
+      <div id="loginError" style="color:#ef5350;font-size:13px;margin-bottom:10px;min-height:20px"></div>
+      <button id="loginBtn" onclick="doLogin()" style="width:100%;padding:12px;background:#4fc3f7;color:#1a1a2e;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer">登录</button>
+    </div>`;
+}
 
-function enableInput() {
+async function doLogin() {
+  const name = document.getElementById('loginName').value.trim();
+  const pass = document.getElementById('loginPass').value;
+  const err = document.getElementById('loginError');
+  const btn = document.getElementById('loginBtn');
+  if (!name) { err.textContent = '请输入用户名'; return; }
+  btn.textContent = '...'; btn.disabled = true;
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_name: name, password: pass }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      humanToken = data.api_token;
+      localStorage.setItem(TOKEN_KEY, humanToken);
+      showChat();
+      await fetchParticipants();
+      await loadHistory();
+      addMessage({
+        message_id: 'system', agent_name: '系统', avatar: '☕',
+        text: `欢迎，${name}！`, sender_type: 'system', type: 'system',
+        created_at: new Date().toISOString(),
+      });
+    } else {
+      err.textContent = data.detail || '登录失败';
+    }
+  } catch (e) {
+    err.textContent = '连接失败';
+  }
+  btn.textContent = '登录'; btn.disabled = false;
+}
+
+function showChat() {
+  chatArea.innerHTML = '<div class="empty-state">咖啡馆长桌刚刚摆好，等人来放杯子 ☕</div>';
   msgInput.disabled = false; sendBtn.disabled = false;
   msgInput.placeholder = '说点什么...';
 }

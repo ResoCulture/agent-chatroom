@@ -4,10 +4,11 @@ FastAPI + SQLite + SSE
 """
 
 import asyncio
+import hashlib
 import json
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import aiosqlite
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -72,7 +73,22 @@ async def init_db():
             sender_type TEXT DEFAULT 'agent',
             api_token TEXT UNIQUE NOT NULL,
             last_heartbeat TEXT,
+            ip_address TEXT DEFAULT '',
             created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS credentials (
+            agent_name TEXT PRIMARY KEY,
+            password_hash TEXT NOT NULL,
+            failed_attempts INTEGER DEFAULT 0,
+            locked_until TEXT
+        );
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT DEFAULT (datetime('now')),
+            event TEXT NOT NULL,
+            agent_name TEXT,
+            ip_address TEXT,
+            details TEXT
         );
         CREATE TABLE IF NOT EXISTS messages (
             id TEXT PRIMARY KEY,
@@ -89,11 +105,10 @@ async def init_db():
         CREATE INDEX IF NOT EXISTS idx_msg_event_time ON messages(event_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_participant_token ON participants(api_token);
     """)
-    # 兼容旧数据库：如果 last_heartbeat 列不存在则添加
-    try:
-        await db.execute("ALTER TABLE participants ADD COLUMN last_heartbeat TEXT")
-    except:
-        pass
+    # 兼容旧数据库
+    for col, typ in [("last_heartbeat", "TEXT"), ("ip_address", "TEXT")]:
+        try: await db.execute(f"ALTER TABLE participants ADD COLUMN {col} {typ}")
+        except: pass
     await db.commit()
     await db.close()
 
@@ -165,12 +180,148 @@ def _serve_skill(request: Request):
     content = content.replace("http://localhost:8765", base)
     return HTMLResponse(content, media_type="text/markdown; charset=utf-8")
 
+# ─── Auth ──────────────────────────────────────────────────
+
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
+
+async def audit_log(db, event: str, agent_name: str, ip: str, details: str = ""):
+    await db.execute(
+        "INSERT INTO audit_log (event, agent_name, ip_address, details) VALUES (?, ?, ?, ?)",
+        (event, agent_name, ip, details),
+    )
+    await db.commit()
+
+@app.post("/api/auth/login")
+async def login(request: Request):
+    """人类登录。密码错误 3 次锁 15 分钟。"""
+    try:
+        body = await request.json()
+    except:
+        raise HTTPException(status_code=400, detail="需要 JSON body")
+    
+    agent_name = body.get("agent_name", "").strip()
+    password = body.get("password", "")
+    client_ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
+    
+    if not agent_name:
+        raise HTTPException(status_code=400, detail="请输入用户名")
+    
+    db = await get_db()
+    try:
+        # 查凭证
+        cursor = await db.execute("SELECT * FROM credentials WHERE agent_name=?", (agent_name,))
+        cred = await cursor.fetchone()
+        
+        if not cred:
+            await audit_log(db, "LOGIN_FAIL", agent_name, client_ip, "用户不存在")
+            raise HTTPException(status_code=401, detail="用户名或密码错误")
+        
+        cred = dict(cred)
+        
+        # 检查锁定
+        if cred["locked_until"]:
+            locked = datetime.fromisoformat(cred["locked_until"])
+            if datetime.now() > locked:
+                # 锁已过期，重置
+                await db.execute("UPDATE credentials SET locked_until=NULL, failed_attempts=0 WHERE agent_name=?", (agent_name,))
+                await db.commit()
+                cred["locked_until"] = None
+                cred["failed_attempts"] = 0
+            else:
+                remain = int((locked - datetime.now()).total_seconds() / 60)
+                await audit_log(db, "LOGIN_LOCKED", agent_name, client_ip, f"账户锁定中，剩余{remain}分钟")
+                raise HTTPException(status_code=423, detail=f"账户已锁定，{remain}分钟后重试")
+        
+        # 验证密码
+        if hash_password(password) != cred["password_hash"]:
+            fails = cred["failed_attempts"] + 1
+            if fails >= 3:
+                lock_until = (datetime.now() + timedelta(minutes=15)).isoformat()
+                await db.execute("UPDATE credentials SET failed_attempts=?, locked_until=? WHERE agent_name=?", (fails, lock_until, agent_name))
+                await audit_log(db, "LOGIN_LOCKED", agent_name, client_ip, "密码错误3次，锁定15分钟")
+                raise HTTPException(status_code=423, detail="密码错误3次，账户锁定15分钟")
+            else:
+                await db.execute("UPDATE credentials SET failed_attempts=? WHERE agent_name=?", (fails, agent_name))
+                await audit_log(db, "LOGIN_FAIL", agent_name, client_ip, f"密码错误({fails}/3)")
+                raise HTTPException(status_code=401, detail=f"密码错误（{fails}/3次）")
+        
+        # 登录成功
+        await db.execute("UPDATE credentials SET failed_attempts=0, locked_until=NULL WHERE agent_name=?", (agent_name,))
+        
+        # 返回已有的 participant token，或创建新的
+        cursor2 = await db.execute(
+            "SELECT id, api_token FROM participants WHERE event_id=? AND agent_name=? AND sender_type='human' LIMIT 1",
+            (EVENT_ID, agent_name),
+        )
+        participant = await cursor2.fetchone()
+        if participant:
+            token = participant["api_token"]
+        else:
+            token = "human__" + str(uuid.uuid4()).replace("-", "")[:24]
+            pid = str(uuid.uuid4())
+            await db.execute(
+                """INSERT INTO participants (id, event_id, name, agent_name, sender_type, api_token, ip_address)
+                   VALUES (?, ?, ?, ?, 'human', ?, ?)""",
+                (pid, EVENT_ID, agent_name, agent_name, token, client_ip),
+            )
+        
+        await db.commit()
+        await audit_log(db, "LOGIN_SUCCESS", agent_name, client_ip, "")
+        
+        return {"api_token": token, "agent_name": agent_name, "message": "登录成功"}
+    finally:
+        await db.close()
+
+@app.post("/api/auth/set-password")
+async def set_password(request: Request):
+    """设置或修改密码（需要已有 token 或首次设置）."""
+    try:
+        body = await request.json()
+    except:
+        raise HTTPException(status_code=400, detail="需要 JSON body")
+    
+    agent_name = body.get("agent_name", "").strip()
+    new_password = body.get("password", "")
+    
+    if not agent_name or not new_password:
+        raise HTTPException(status_code=400, detail="用户名和密码不能为空")
+    
+    db = await get_db()
+    try:
+        existing = await db.execute("SELECT * FROM credentials WHERE agent_name=?", (agent_name,))
+        if await existing.fetchone():
+            raise HTTPException(status_code=400, detail="密码已设置，请联系管理员重置")
+        
+        await db.execute(
+            "INSERT INTO credentials (agent_name, password_hash) VALUES (?, ?)",
+            (agent_name, hash_password(new_password)),
+        )
+        await db.commit()
+        return {"message": "密码设置成功"}
+    finally:
+        await db.close()
+
+
+@app.get("/api/admin/audit-log")
+async def get_audit_log():
+    """查看审计日志."""
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM audit_log ORDER BY timestamp DESC LIMIT 100")
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await db.close()
+
+
 @app.post("/api/events/{event_id}/register")
 async def register(event_id: str, body: RegisterRequest, request: Request):
     eid = event_id or EVENT_ID
     host = request.headers.get("host", f"localhost:{PORT}")
     scheme = request.url.scheme
     base = f"{scheme}://{host}"
+    client_ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
 
     db = await get_db()
     try:
@@ -199,11 +350,11 @@ async def register(event_id: str, body: RegisterRequest, request: Request):
     try:
         await db.execute(
             """INSERT INTO participants (id, event_id, name, bio, avatar, agent_name,
-               interests, looking_for, socials, sender_type, api_token)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               interests, looking_for, socials, sender_type, api_token, ip_address)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (pid, eid, body.name, body.bio, body.avatar, body.agent_name,
              json.dumps(body.interests), body.looking_for, json.dumps(body.socials),
-             body.sender_type, token),
+             body.sender_type, token, client_ip),
         )
         await db.commit()
     finally:
