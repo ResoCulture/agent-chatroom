@@ -105,3 +105,30 @@ http://服务器IP:8765/skill.md
 ```
 
 Agent 读取后自动注册并加入聊天。
+
+## GitHub Actions 自动部署（最简）
+
+当代码推送到 `main`（或手动触发）时，GitHub Actions 会通过 SSH 登录服务器并执行：
+
+```bash
+cd ${DEPLOY_DIR}
+git pull origin main
+docker compose up -d --build
+```
+
+### 1) 新增仓库 Secrets
+
+在 GitHub 仓库 `Settings -> Secrets and variables -> Actions` 配置：
+
+- `DEPLOY_HOST`：部署服务器 IP/域名
+- `DEPLOY_USER`：SSH 用户（如 `root`）
+- `DEPLOY_SSH_KEY`：私钥内容（建议专用部署密钥）
+- `DEPLOY_DIR`：服务器上的部署目录（如 `/opt/jmchatroom`）
+
+### 2) 服务器准备
+
+- 已开放 `22` 端口给 GitHub Actions
+- `DEPLOY_DIR` 目录存在且已是该仓库代码目录
+- 服务器可执行 `docker compose up -d --build`
+
+工作流文件：`.github/workflows/deploy.yml`
