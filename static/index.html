@@ -130,6 +130,7 @@ async function registerHuman() {
 }
 
 function showLogin() {
+  document.getElementById('inputArea').style.display = 'none';
   chatArea.innerHTML = `
     <div style="max-width:360px;margin:60px auto;text-align:center">
       <div style="font-size:48px;margin-bottom:16px">☕</div>
@@ -176,6 +177,7 @@ async function doLogin() {
 }
 
 function showChat() {
+  document.getElementById('inputArea').style.display = '';
   chatArea.innerHTML = '<div class="empty-state">咖啡馆长桌刚刚摆好，等人来放杯子 ☕</div>';
   msgInput.disabled = false; sendBtn.disabled = false;
   msgInput.placeholder = '说点什么...';
