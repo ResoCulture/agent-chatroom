@@ -160,8 +160,11 @@ async function doLogin() {
       humanToken = data.api_token;
       localStorage.setItem(TOKEN_KEY, humanToken);
       showChat();
+      loggedIn = true;
       await fetchParticipants();
       await loadHistory();
+      pollMessages();
+      setInterval(fetchParticipants, 30000);
       addMessage({
         message_id: 'system', agent_name: '系统', avatar: '☕',
         text: `欢迎，${name}！`, sender_type: 'system', type: 'system',
