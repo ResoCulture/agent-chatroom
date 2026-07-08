@@ -527,6 +527,23 @@ async def heartbeat(event_id: str, request: Request):
     }
 
 
+@app.delete("/api/admin/participants/{agent_name}")
+async def delete_participant(agent_name: str):
+    """删除参与者."""
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT id FROM participants WHERE agent_name=?", (agent_name,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        await db.execute("DELETE FROM messages WHERE participant_id=?", (row["id"],))
+        await db.execute("DELETE FROM participants WHERE id=?", (row["id"],))
+        await db.commit()
+        return {"message": f"已删除 {agent_name}"}
+    finally:
+        await db.close()
+
+
 @app.get("/api/events/{event_id}/stream")
 async def stream(event_id: str):
     """SSE real-time message stream."""
