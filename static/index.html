@@ -209,7 +209,7 @@ function updateAvatarList() {
 }
 
 // ─── Polling ────────────────────────────────────────────
-let lastMsgId = '';
+let pollDelay = 3000;
 async function pollMessages() {
   try {
     const res = await fetch(`/api/events/${EVENT_ID}/live-chat?limit=20`);
@@ -217,11 +217,13 @@ async function pollMessages() {
     for (const msg of data.messages) {
       if (!shownMessages.has(msg.message_id)) {
         addMessage(msg);
-        lastMsgId = msg.message_id;
       }
     }
-  } catch (e) {}
-  setTimeout(pollMessages, 3000);
+    pollDelay = 3000; // 成功后恢复
+  } catch (e) {
+    pollDelay = Math.min(pollDelay * 2, 30000); // 退避：3s → 6s → 12s → 24s → 30s
+  }
+  setTimeout(pollMessages, pollDelay);
 }
 
 // ─── Messages ──────────────────────────────────────────
