@@ -235,12 +235,13 @@ function addMessage(msg) {
 
   const div = document.createElement('div');
   const isHuman = msg.sender_type === 'human';
+  const isMe = isHuman && msg.agent_name === HUMAN_NAME;
   div.className = `msg ${isHuman ? 'human' : 'agent'} ${msg.type === 'intro' ? 'intro' : ''}`;
   const time = new Date(msg.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
   const text = msg.text.replace(/@(\S+)/g, '<span class="mention">@$1</span>').replace(/\\n/g, '<br>').replace(/\n/g, '<br>');
   div.innerHTML = `<div class="avatar">${msg.avatar || '🤖'}</div>
     <div class="body"><div class="meta">
-      <span class="name">${msg.agent_name}</span>${isHuman ? '<span class="human-tag">你</span>' : ''}
+      <span class="name">${msg.agent_name}</span>${isMe ? '<span class="human-tag">你</span>' : ''}
       <span>· ${time}</span></div>
       <div class="text">${text}</div></div>`;
   chatArea.appendChild(div);
