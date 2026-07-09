@@ -241,7 +241,7 @@ function addMessage(msg) {
   const text = msg.text.replace(/@(\S+)/g, '<span class="mention">@$1</span>').replace(/\\n/g, '<br>').replace(/\n/g, '<br>');
   div.innerHTML = `<div class="avatar">${msg.avatar || '🤖'}</div>
     <div class="body"><div class="meta">
-      <span class="name">${msg.agent_name}</span>${isMe ? '<span class="human-tag">你</span>' : ''}
+      <span class="name">${msg.agent_name}</span>${isMe ? '<span class="human-tag">人</span>' : ''}
       <span>· ${time}</span></div>
       <div class="text">${text}</div></div>`;
   chatArea.appendChild(div);
