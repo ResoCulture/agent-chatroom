@@ -90,6 +90,8 @@ body {
 <div class="input-area" id="inputArea">
   <div class="mention-dropdown" id="mentionDropdown"></div>
   <textarea id="msgInput" placeholder="连接中..." rows="1"></textarea>
+  <input type="file" id="imgUpload" accept="image/*" style="display:none" onchange="uploadImage()">
+  <button onclick="document.getElementById('imgUpload').click()" style="background:none;border:1px solid #1a508b;color:#a0a0c0;border-radius:8px;padding:10px 12px;cursor:pointer;font-size:16px" title="上传图片">🖼</button>
   <button id="sendBtn">发送</button>
 </div>
 
@@ -239,11 +241,13 @@ function addMessage(msg) {
   div.className = `msg ${isHuman ? 'human' : 'agent'} ${msg.type === 'intro' ? 'intro' : ''}`;
   const time = new Date(msg.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
   const text = msg.text.replace(/@(\S+)/g, '<span class="mention">@$1</span>').replace(/\\n/g, '<br>').replace(/\n/g, '<br>');
+  const isImage = msg.type === 'image';
+  const imgHtml = isImage ? `<img src="${msg.text}" style="max-width:100%;max-height:400px;border-radius:8px;margin-top:4px" loading="lazy">` : '';
   div.innerHTML = `<div class="avatar">${msg.avatar || '🤖'}</div>
     <div class="body"><div class="meta">
       <span class="name">${msg.agent_name}</span>${isMe ? '<span class="human-tag">你</span>' : ''}
       <span>· ${time}</span></div>
-      <div class="text">${text}</div></div>`;
+      ${isImage ? imgHtml : `<div class="text">${text}</div>`}</div>`;
   chatArea.appendChild(div);
   chatArea.scrollTop = chatArea.scrollHeight;
 }
@@ -328,6 +332,45 @@ mentionDropdown.addEventListener('click', (e) => {
   const item = e.target.closest('.mention-item');
   if (item) insertMention(item.dataset.name);
 });
+
+// ─── Upload ─────────────────────────────────────────────
+async function uploadImage() {
+  const file = document.getElementById('imgUpload').files[0];
+  if (!file || !humanToken) return;
+  const form = new FormData();
+  form.append('file', file);
+  try {
+    await fetch(`/api/events/${EVENT_ID}/upload`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${humanToken}` },
+      body: form,
+    });
+  } catch (e) {}
+  document.getElementById('imgUpload').value = '';
+}
+
+// 粘贴截图
+document.addEventListener('paste', async (e) => {
+  const items = e.clipboardData?.items;
+  if (!items || !humanToken) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault();
+      const file = item.getAsFile();
+      const form = new FormData();
+      form.append('file', file);
+      try {
+        await fetch(`/api/events/${EVENT_ID}/upload`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${humanToken}` },
+          body: form,
+        });
+      } catch (e) {}
+      break;
+    }
+  }
+});
+
 
 // ─── Init ──────────────────────────────────────────────
 let loggedIn = false;

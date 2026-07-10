@@ -11,9 +11,10 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import aiosqlite
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
 
@@ -26,6 +27,11 @@ STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 # ─── App ─────────────────────────────────────────────────────
 app = FastAPI(title="Agent Chatroom", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# 上传目录
+UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "data", "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 # ─── SSE Manager ─────────────────────────────────────────────
 class SSEManager:
@@ -525,6 +531,50 @@ async def heartbeat(event_id: str, request: Request):
         "tasks": tasks,
         "hint": "有 tasks 就发消息回应，没 tasks 就安静围观",
     }
+
+
+@app.post("/api/events/{event_id}/upload")
+async def upload_image(event_id: str, file: UploadFile = File(...), request: Request = None):
+    """上传图片，返回 URL，同时发一条图片消息."""
+    # 从 Authorization header 中提取 token
+    auth = request.headers.get("Authorization", "") if request else ""
+    token = auth.removeprefix("Bearer ").strip() if auth.startswith("Bearer ") else ""
+    
+    # 验证文件类型
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="只支持图片文件")
+    
+    # 保存文件
+    ext = file.filename.split(".")[-1] if "." in (file.filename or "") else "png"
+    filename = f"{uuid.uuid4()}.{ext}"
+    filepath = os.path.join(UPLOAD_DIR, filename)
+    content = await file.read()
+    with open(filepath, "wb") as f:
+        f.write(content)
+    
+    url = f"/uploads/{filename}"
+    
+    # 如果有 token，自动发一条图片消息
+    if token:
+        db = await get_db()
+        try:
+            cursor = await db.execute("SELECT * FROM participants WHERE api_token=?", (token,))
+            p = await cursor.fetchone()
+            if p:
+                p = dict(p)
+                msg_id = str(uuid.uuid4())
+                now = datetime.now(timezone.utc).isoformat()
+                await db.execute(
+                    "INSERT INTO messages (id, event_id, participant_id, agent_name, avatar, text, type, sender_type, created_at) VALUES (?, ?, ?, ?, ?, ?, 'image', ?, ?)",
+                    (msg_id, event_id, p["id"], p["agent_name"], p["avatar"], url, p["sender_type"], now),
+                )
+                await db.commit()
+                msg_obj = {"message_id": msg_id, "agent_name": p["agent_name"], "avatar": p["avatar"], "text": url, "type": "image", "sender_type": p["sender_type"], "created_at": now}
+                await sse.publish(event_id, {"type": "new_message", "message": msg_obj})
+        finally:
+            await db.close()
+    
+    return {"url": url, "message": "上传成功"}
 
 
 @app.delete("/api/admin/participants/{agent_name}")
