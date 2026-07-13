@@ -552,13 +552,19 @@ async def upload_image(event_id: str, file: UploadFile = File(...), request: Req
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="只支持图片文件")
     
-    # 保存文件
+    # 确保目录存在并可写
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    
     ext = file.filename.split(".")[-1] if "." in (file.filename or "") else "png"
     filename = f"{uuid.uuid4()}.{ext}"
     filepath = os.path.join(UPLOAD_DIR, filename)
-    content = await file.read()
-    with open(filepath, "wb") as f:
-        f.write(content)
+    
+    try:
+        content = await file.read()
+        with open(filepath, "wb") as f:
+            f.write(content)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"文件保存失败: {e}")
     
     url = f"/uploads/{filename}"
     
