@@ -31,7 +31,6 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 # 上传目录
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "data", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 # ─── SSE Manager ─────────────────────────────────────────────
 class SSEManager:
@@ -154,6 +153,15 @@ async def get_participant(request: Request):
         await db.close()
 
 # ─── Routes ──────────────────────────────────────────────────
+
+@app.get("/uploads/{filename}")
+async def serve_upload(filename: str):
+    """服务上传的图片."""
+    path = os.path.join(UPLOAD_DIR, filename)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return FileResponse(path)
+
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
